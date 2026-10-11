@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Fargelab: BGR og HSV i OpenCV</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎨%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="topbar" aria-label="Faner">
+  <div class="wrap topbar-inner" role="tablist" aria-label="Velg fane">
+    <button type="button" class="tab" role="tab" id="tabLab" data-fane="fargelab" aria-controls="panelLab" aria-selected="true">Fargelab</button>
+    <button type="button" class="tab" role="tab" id="tabPy" data-fane="python" aria-controls="panelPy" aria-selected="false" tabindex="-1">Python</button>
+  </div>
+</nav>
+
+<div id="panelLab" role="tabpanel" aria-labelledby="tabLab">
+<header class="hero" id="hero">
+  <div class="wrap">
+    <h1>Fargelab for BGR og HSV</h1>
+    <p class="lede">Endre en farge i den ene fargemodellen, og se hvilke verdier den får i den andre. Tallene er de samme som <span class="num">cv2.cvtColor</span> gir i OpenCV.</p>
+    <dl class="readout">
+      <div><dt>BGR</dt><dd class="num" id="roBGR">[0, 0, 0]</dd></div>
+      <div><dt>Konvertering</dt><dd class="num bridge" id="bridge" data-dir="bgr"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 20h26M22 10l10 10-10 10" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="bridgeLabel">BGR2HSV</span></dd></div>
+      <div><dt>HSV i OpenCV</dt><dd class="num" id="roHSV">[0, 0, 0]</dd></div>
+      <div><dt>HSV i grader og prosent</dt><dd class="num" id="roStd">0°, 0 %, 0 %</dd></div>
+      <div><dt>Hex (RGB-rekkefølge)</dt><dd class="num" id="roHex">#000000</dd></div>
+      <div id="roPixBox" hidden><dt>Piksel i bildet</dt><dd class="num" id="roPix">x 0, y 0</dd></div>
+    </dl>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="toolbar">
+    <div class="presets" id="presets"><span class="presets-label">Prøv en farge:</span></div>
+    <p class="status" id="status" role="status" data-state="loading"><span class="led" aria-hidden="true"></span><span id="statusText">Laster OpenCV.js.</span></p>
+  </div>
+
+  <div class="board-bar" id="boardBar">
+    <p>Flytt et kort med håndtaket <span class="grip-glyph" aria-hidden="true">⠿</span> ved tittelen. Endre størrelsen ved å dra i hjørnet eller kantene.</p>
+    <button type="button" class="btn" id="layoutReset" hidden>Tilbakestill oppsett</button>
+  </div>
+  <p class="sr-only" id="boardLive" aria-live="polite"></p>
+
+  <!-- Kortene ligger i rader. oppsett.js flytter dem og endrer størrelsen. -->
+  <div class="board" id="board">
+  <div class="board-row">
+  <section class="panel card imgpanel" id="imgPanel" data-card="bilde" aria-labelledby="hImg">
+    <div class="panel-head">
+      <div>
+        <h2 id="hImg">Bilde</h2>
+        <p class="panel-sub" id="imgSub">Slipp et bilde hvor som helst på siden, lim det inn med Ctrl+V eller velg en fil. Bildet blir i nettleseren og lastes ikke opp noe sted.</p>
+      </div>
+      <div class="img-actions">
+        <label class="check" id="imgGrayBox" title="Vis bildet i gråtoner, og send gråtonen til fargekartene (cv2.COLOR_BGR2GRAY)" hidden><input type="checkbox" id="imgGray"> Gråtone</label>
+        <label class="check" id="imgBinBox" title="Vis bildet binært: maxval der gråtonen er over terskelen, ellers 0 (cv2.threshold med THRESH_BINARY)" hidden><input type="checkbox" id="imgBin" aria-controls="imgThresh"> Binær</label>
+        <select class="img-folder" id="imgFolderSel" aria-label="Åpne et bilde fra mappen bilder/" hidden>
+          <option value="">Fra bilder/ …</option>
+        </select>
+        <button type="button" class="btn" id="imgPick">Velg bilde</button>
+        <button type="button" class="btn" id="imgSaveFolder" title="Lagre bildet i mappen bilder/ i prosjektet" hidden>Lagre i bilder/</button>
+        <button type="button" class="btn" id="imgClear" hidden>Fjern bildet</button>
+        <input type="file" id="imgFile" accept="image/*" hidden>
+      </div>
+    </div>
+    <p class="img-msg" id="imgMsg" role="status" hidden></p>
+    <div class="img-thresh" id="imgThresh" hidden>
+      <div class="trow">
+        <label class="tl" for="imgT"><span>Terskel</span><span class="tl-code num">thresh</span></label>
+        <input type="range" id="imgT" min="0" max="255" step="1" value="127">
+        <input type="number" class="nbox num" id="imgTn" min="0" max="255" step="1" value="127" inputmode="numeric" aria-label="Terskel (thresh), verdi 0 til 255">
+      </div>
+      <div class="trow">
+        <label class="tl" for="imgM"><span>Maksverdi</span><span class="tl-code num">maxval</span></label>
+        <input type="range" id="imgM" min="0" max="255" step="1" value="255">
+        <input type="number" class="nbox num" id="imgMn" min="0" max="255" step="1" value="255" inputmode="numeric" aria-label="Maksverdi (maxval), verdi 0 til 255">
+      </div>
+      <p class="img-thresh-text">Piksler med gråtone over terskelen får maksverdien. Resten blir 0.</p>
+    </div>
+    <div class="img-body" id="imgBody" hidden>
+      <div class="img-stage fit" id="imgStage">
+        <div class="img-frame" id="imgFrame" tabindex="0" aria-label="Bilde. Klikk, dra eller bruk piltastene for å flytte markøren." aria-describedby="imgHint">
+          <canvas id="imgView" width="0" height="0"></canvas>
+          <div class="img-marker" id="imgMarker">
+            <svg viewBox="0 0 40 40" aria-hidden="true">
+              <g fill="none" stroke-linecap="round">
+                <g stroke="rgba(0,0,0,.8)" stroke-width="4"><circle cx="20" cy="20" r="8.5"/><path d="M20 2v7M20 31v7M2 20h7M31 20h7"/></g>
+                <g stroke="#fff" stroke-width="2"><circle cx="20" cy="20" r="8.5"/><path d="M20 2v7M20 31v7M2 20h7M31 20h7"/></g>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="img-side">
+        <canvas class="loupe" id="imgLoupe" width="150" height="150" title="Klikk for å velge en nabopiksel" aria-hidden="true"></canvas>
+        <div class="img-info">
+          <dl class="img-vals" aria-live="polite">
+            <dt>Piksel</dt><dd class="num" id="imgXY"></dd>
+            <dt id="imgBinDt" hidden>Binær</dt><dd class="num" id="imgBinDd" hidden><span class="swatch" id="imgBinSwatch"></span><span id="imgBinVal"></span></dd>
+            <dt id="imgGrayDt" hidden>Grå</dt><dd class="num" id="imgGrayDd" hidden><span class="swatch" id="imgGraySwatch"></span><span id="imgGrayVal"></span></dd>
+            <dt>BGR</dt><dd class="num"><span class="swatch" id="imgSwatch"></span><span id="imgBGR"></span></dd>
+            <dt>HSV</dt><dd class="num" id="imgHSV"></dd>
+          </dl>
+          <p class="img-note" id="imgGrayNote" hidden>Grå = 0,299 R + 0,587 G + 0,114 B, som i <span class="num">COLOR_BGR2GRAY</span>. BGR og HSV er fargen i bildet.</p>
+          <p class="img-note" id="imgBinNote" hidden></p>
+          <p class="img-note" id="imgAlpha" hidden></p>
+          <p class="img-link" id="imgLink"></p>
+          <button type="button" class="btn" id="imgApply" hidden>Bruk pikselen</button>
+        </div>
+      </div>
+    </div>
+    <p class="caption img-hint" id="imgHint" hidden>Klikk eller dra i bildet for å flytte markøren. Piltastene flytter én piksel om gangen, med Shift ti. Klikk i luppen for å velge en av nabopikslene.</p>
+  </section>
+  </div>
+
+  <div class="board-row">
+    <section class="panel card" id="bgrPanel" data-card="bgr" aria-labelledby="hBGR">
+      <div class="panel-head">
+        <div>
+          <h2 id="hBGR">BGR</h2>
+          <p class="panel-sub">Blå, grønn og rød, 0–255 hver</p>
+        </div>
+        <label class="mode">Fargekart
+          <select id="bgrMode">
+            <option value="3d" selected>3D-kube (dra for å snu)</option>
+            <option value="b">Lås B, vis G mot R</option>
+            <option value="g">Lås G, vis B mot R</option>
+            <option value="r">Lås R, vis B mot G</option>
+          </select>
+        </label>
+      </div>
+      <div class="fit" id="bgrFit">
+        <div class="map" id="bgrMapBox">
+          <div class="axis-y"><span>255</span><span class="axis-name" id="bgrYName">G</span><span>0</span></div>
+          <div class="frame" id="bgrFrame" tabindex="0" aria-label="BGR-fargekart. Klikk eller bruk piltastene for å velge farge." aria-describedby="bgrCaption">
+            <canvas id="bgrMap" width="256" height="256"></canvas>
+            <div class="marker" id="bgrMarker"></div>
+          </div>
+          <div class="axis-x"><span>0</span><span class="axis-name" id="bgrXName">R</span><span>255</span></div>
+        </div>
+        <div class="s3d" id="cube3dBox" hidden>
+          <div class="s3d-host" id="cubeHost"></div>
+        </div>
+      </div>
+      <div class="s3d-controls" id="cubeControls" hidden>
+        <label class="check"><input type="checkbox" id="cubeCut" checked> Skjær ut hjørnet mot deg</label>
+        <label class="check"><input type="checkbox" id="cubeCorners"> Vis hjørnenavn</label>
+        <button type="button" class="btn" id="cubeReset">Tilbakestill visning</button>
+      </div>
+      <p class="caption" id="bgrCaption"></p>
+      <div class="sliders" id="bgrSliders"></div>
+    </section>
+
+    <section class="panel card" id="hsvPanel" data-card="hsv" aria-labelledby="hHSV">
+      <div class="panel-head">
+        <div>
+          <h2 id="hHSV">HSV</h2>
+          <p class="panel-sub">H 0–179, S og V 0–255</p>
+        </div>
+        <label class="mode">Fargekart
+          <select id="hsvMode">
+            <option value="3d" selected>3D-sylinder (dra for å snu)</option>
+            <option value="sv">Lås H, vis V mot S</option>
+            <option value="wheel">Fargehjul: lås V, vis H og S</option>
+            <option value="hs">Lås V, vis S mot H</option>
+            <option value="hv">Lås S, vis V mot H</option>
+          </select>
+        </label>
+      </div>
+      <div class="fit" id="hsvFit">
+        <div class="map" id="hsvMapBox">
+          <div class="axis-y"><span>255</span><span class="axis-name" id="hsvYName">V</span><span>0</span></div>
+          <div class="frame" id="hsvFrame" tabindex="0" aria-label="HSV-fargekart. Klikk eller bruk piltastene for å velge farge." aria-describedby="hsvCaption">
+            <canvas id="hsvMap" width="256" height="256"></canvas>
+            <div class="marker" id="hsvMarker"></div>
+          </div>
+          <div class="axis-x"><span>0</span><span class="axis-name" id="hsvXName">S</span><span id="hsvXMax">255</span></div>
+        </div>
+        <div class="s3d" id="cyl3dBox" hidden>
+          <div class="s3d-host" id="cylHost"></div>
+        </div>
+      </div>
+      <div class="s3d-controls" id="cylControls" hidden>
+        <label class="check"><input type="checkbox" id="cylCut" checked> Skjær ut en kakebit mot deg</label>
+        <label class="check"><input type="checkbox" id="cylNames"> Vis fargenavn</label>
+        <button type="button" class="btn" id="cylReset">Tilbakestill visning</button>
+      </div>
+      <p class="caption" id="hsvCaption"></p>
+      <div class="sliders" id="hsvSliders"></div>
+    </section>
+  </div>
+  </div>
+
+  <div class="details">
+    <section aria-labelledby="hCode">
+      <h3 id="hCode">Samme konvertering i kode</h3>
+      <div class="seg" role="group" aria-label="Språk">
+        <button type="button" data-lang="py" aria-pressed="true">Python</button>
+        <button type="button" data-lang="js" aria-pressed="false">opencv.js</button>
+      </div>
+      <pre class="code"><code id="code"></code></pre>
+    </section>
+    <section aria-labelledby="hRT">
+      <h3 id="hRT">Fram og tilbake</h3>
+      <dl class="chain num" id="chain"></dl>
+      <p class="rt-text" id="rtText"></p>
+    </section>
+  </div>
+
+  <section class="notes" aria-label="Verdt å vite">
+    <div>
+      <h3>OpenCV lagrer farger som BGR</h3>
+      <p>Bilder fra <code>cv2.imread</code> har blå kanal først. Nettet og de fleste andre verktøy bruker RGB, så hex-koden øverst står i RGB-rekkefølge.</p>
+    </div>
+    <div>
+      <h3>H går bare til 179</h3>
+      <p>Nyansen er en vinkel fra 0° til 360°, men en <code>uint8</code> rommer bare 0–255. OpenCV deler derfor vinkelen på 2. Med <code>COLOR_BGR2HSV_FULL</code> får du 0–255 i stedet.</p>
+    </div>
+    <div>
+      <h3>Rødt ligger i begge ender</h3>
+      <p>Rød nyanse finnes både nær H = 0 og nær H = 179. Skal du finne røde områder med <code>cv2.inRange</code>, trenger du ofte to masker som du slår sammen.</p>
+    </div>
+    <div>
+      <h3>S og V kan gjøre H meningsløs</h3>
+      <p>Når V er 0 er fargen svart, og når S er 0 er den grå. Da spiller H ingen rolle, og verdiene kommer ikke nødvendigvis tilbake hvis du går via BGR.</p>
+    </div>
+  </section>
+
+  <footer>Uten OpenCV.js regner siden med en JavaScript-kopi av OpenCVs 8-bits algoritme (js/hsv-kopi.js). Den er kontrollert mot OpenCV.js 4.10 for alle 16,7 millioner BGR-farger og alle HSV-kombinasjoner, også gråtonen. Du kan kjøre kontrollen selv med <span class="num">node test/sammenlign.js</span>.</footer>
+</main>
+</div>
+
+<!-- Python-fanen. python.js kjører skriptene med Pyodide i en Web Worker. -->
+<div id="panelPy" role="tabpanel" aria-labelledby="tabPy" hidden>
+<main class="wrap wrap-wide py">
+  <div class="py-head">
+    <div>
+      <h1>Python med OpenCV</h1>
+      <p class="lede">Skriv Python-skript med OpenCV, numpy og matplotlib, og kjør dem rett i nettleseren. Python kjører i <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>, som er Python kompilert til WebAssembly.</p>
+    </div>
+    <p class="status" id="pyStatus" role="status" data-state="idle"><span class="led" aria-hidden="true"></span><span id="pyStatusText">Python startes når du åpner denne fanen.</span></p>
+  </div>
+
+  <div class="py-toolbar">
+    <button type="button" class="btn btn-primary" id="pyRun" title="Kjør skriptet (Ctrl+Enter)">▶ Kjør <kbd>Ctrl+Enter</kbd></button>
+    <button type="button" class="btn" id="pyStop" disabled title="Avbryt skriptet og start Python på nytt">■ Stopp</button>
+    <button type="button" class="btn" id="pyNbRestart" title="Tøm variablene i notatboken, som «Restart runtime» i Colab" hidden>↻ Start på nytt</button>
+    <button type="button" class="btn" id="pyNbClear" title="Fjern utdataene under alle cellene" hidden>Tøm utdata</button>
+    <label class="py-examples">Eksempel
+      <select id="pyExamples"><option value="">Velg et eksempel …</option></select>
+    </label>
+    <span class="py-spacer"></span>
+    <button type="button" class="btn" id="pyOpen">Åpne .py</button>
+    <button type="button" class="btn" id="pySave">Lagre .py</button>
+    <input type="file" id="pyOpenFile" accept=".py,text/x-python,text/plain" hidden>
+    <button type="button" class="btn py-files-btn py-vars-btn" id="pyVarsBtn" aria-controls="pyVars" aria-expanded="false" title="Variablene i notatboken, eller fra siste kjøring av et skript">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5C7 4.5 6.5 5.5 6.5 7.5v2.2c0 1.3-.8 2.3-2 2.3 1.2 0 2 1 2 2.3v2.2c0 2 .5 3 2.5 3M15 4.5c2 0 2.5 1 2.5 3v2.2c0 1.3.8 2.3 2 2.3-1.2 0-2 1-2 2.3v2.2c0 2-.5 3-2.5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Variabler
+    </button>
+    <button type="button" class="btn py-files-btn" id="pyFilesBtn" aria-haspopup="dialog" aria-controls="pyFilesDialog" title="Filene skriptene kan åpne">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4.4l2 2H19A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      Filer<span class="py-files-count num" id="pyFilesCount" hidden></span>
+    </button>
+  </div>
+  <!-- Fillinjen: skript og notatbøker i mappen skript/ (krever server.py) -->
+  <div class="py-filebar" id="pyFileBar" hidden>
+    <span class="py-folder-label num">skript/</span>
+    <select id="pyFileSel" class="num" aria-label="Skript og notatbøker i mappen skript/"></select>
+    <span class="py-file-state" id="pyFileState" aria-live="polite"></span>
+    <span class="py-spacer"></span>
+    <div class="py-file-btns">
+      <button type="button" class="btn" id="pyNew" title="Nytt skript eller ny notatbok">Ny</button>
+      <button type="button" class="btn" id="pySaveFile" title="Lagre i mappen skript/ (Ctrl+S)">Lagre</button>
+      <button type="button" class="btn" id="pyRename">Gi nytt navn</button>
+      <button type="button" class="btn" id="pyDelete">Slett</button>
+    </div>
+  </div>
+  <p class="py-folder-note" id="pyFolderNote" hidden>Skriptet lagres bare i nettleseren nå. Start siden med <span class="num">python server.py</span> i prosjektmappen, så kan du lagre skript og notatbøker i mappen <span class="num">skript/</span> og bruke bildene i <span class="num">bilder/</span>.</p>
+  <p class="py-msg" id="pyMsg" role="status" hidden></p>
+
+  <div class="py-grid" id="pyGrid">
+    <section class="panel py-pane" aria-labelledby="hPyEd">
+      <div class="py-pane-head">
+        <h2 id="hPyEd" class="num">skript.py</h2>
+      </div>
+      <div class="py-editor" id="pyEditorBox">
+        <textarea id="pyCode" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Python-kode"></textarea>
+      </div>
+      <p class="py-hint">Ctrl+Enter kjører · Ctrl+S lagrer · Tab rykker inn · Ctrl+/ kommenterer · Esc går ut av editoren</p>
+    </section>
+
+    <section class="panel py-pane" aria-labelledby="hPyOut">
+      <div class="py-pane-head">
+        <h2 id="hPyOut">Utdata</h2>
+        <button type="button" class="btn" id="pyClear">Tøm</button>
+      </div>
+      <div class="py-out" id="pyOut" tabindex="0" aria-label="Utdata fra skriptet"></div>
+    </section>
+  </div>
+
+  <!-- Notatbok (.ipynb): celler med kode og tekst under hverandre. notatbok.js tegner cellene. -->
+  <section class="nb" id="pyNotebook" aria-label="Notatbok" hidden></section>
+
+  <!-- Variabler: et panel til høyre som viser variablene i Python (Variabler-knappen) -->
+  <aside class="py-vars" id="pyVars" aria-labelledby="hPyVars" hidden>
+    <div class="py-vars-head">
+      <h2 id="hPyVars">Variabler</h2>
+      <span class="py-files-count num" id="pyVarsCount" hidden></span>
+      <span class="py-spacer"></span>
+      <button type="button" class="py-close" id="pyVarsClose" aria-label="Lukk" title="Lukk">×</button>
+    </div>
+    <p class="caption py-vars-scope" id="pyVarsScope"></p>
+    <label class="py-vars-all"><input type="checkbox" id="pyVarsAll"> Vis også moduler, funksjoner og klasser</label>
+    <div class="py-vars-list" id="pyVarsList"></div>
+  </aside>
+
+  <!-- Filer: et vindu som åpnes med Filer-knappen øverst til høyre -->
+  <dialog class="py-files-dialog" id="pyFilesDialog" aria-labelledby="hPyFiles">
+    <div class="py-files-inner">
+      <div class="py-files-head">
+        <h2 id="hPyFiles">Filer</h2>
+        <button type="button" class="btn" id="pyAddFiles">Legg til filer</button>
+        <input type="file" id="pyFileInput" multiple hidden>
+        <span class="py-spacer"></span>
+        <button type="button" class="py-close" id="pyFilesClose" aria-label="Lukk" title="Lukk (Esc)">×</button>
+      </div>
+      <p class="caption" id="pyFilesCaption">Skriptet kjører i mappen <span class="num">/home/pyodide</span>. Bildet du åpner i Fargelab-fanen havner her, så <span class="num">cv2.imread('navn.png')</span> virker. Du kan også slippe filer på denne fanen. Filer skriptet lagrer, for eksempel med <span class="num">cv2.imwrite</span>, kan du laste ned.</p>
+      <p class="caption" id="pyFilesFolderCaption" hidden>Alt i mappen <span class="num">bilder/</span> i prosjektet ligger der skriptet kjører, så <span class="num">cv2.imread('navn.jpg')</span> virker uten sti. Nye bilder du legger i mappen, er med neste gang du trykker Kjør. Filer du legger til her eller slipper på fanen, lagres i <span class="num">bilder/</span>. Filer skriptet lagrer, for eksempel med <span class="num">cv2.imwrite</span>, kan du lagre i <span class="num">bilder/</span> eller laste ned.</p>
+      <p class="py-files-msg" id="pyFilesMsg" role="status" hidden></p>
+      <ul class="py-filelist" id="pyFiles"><li class="py-files-empty">Filene vises når Python har startet.</li></ul>
+    </div>
+  </dialog>
+
+  <dialog class="py-dialog" id="pyDialog" aria-labelledby="pyDialogTitle">
+    <h2 id="pyDialogTitle"></h2>
+    <p id="pyDialogText"></p>
+    <label class="py-dialog-field" id="pyDialogField" hidden>
+      <span>Filnavn</span>
+      <input type="text" id="pyDialogInput" class="num" autocomplete="off" spellcheck="false" autocapitalize="off">
+    </label>
+    <p class="py-dialog-err" id="pyDialogErr" role="alert" hidden></p>
+    <div class="py-dialog-btns" id="pyDialogBtns"></div>
+  </dialog>
+
+  <section class="notes" aria-label="Verdt å vite om Python-fanen">
+    <div>
+      <h3>Bilder vises under Utdata</h3>
+      <p><code>cv2.imshow(navn, bilde)</code> og <code>plt.show()</code> viser bildene under Utdata. <code>cv2.waitKey</code> og <code>cv2.destroyAllWindows</code> gjør ingenting. Figurer du ikke har vist, kommer til slutt. Med <code>cv2.setMouseCallback</code> kan du klikke i bildene.</p>
+    </div>
+    <div>
+      <h3>Hent verdier fra Fargelab</h3>
+      <p><code>import fargelab</code> gir <code>fargelab.bgr</code>, <code>fargelab.hsv</code>, <code>fargelab.bilde</code> (filnavnet) og <code>fargelab.piksel</code> (x, y), slik de står i Fargelab-fanen når du trykker Kjør. <code>fargelab.bilder</code> er en liste over filene i <code>bilder/</code>.</p>
+    </div>
+    <div>
+      <h3>Flere pakker</h3>
+      <p>Pakker som følger med Pyodide, for eksempel scipy, pandas og scikit-image, lastes automatisk når skriptet importerer dem. Andre rene Python-pakker kan du hente med <code>micropip</code>.</p>
+    </div>
+    <div>
+      <h3>Det som ikke virker</h3>
+      <p><code>input()</code>, tkinter og wxPython virker ikke i nettleseren. Bruk widgets i stedet: <code>@interact</code>, <code>ipywidgets</code> eller <code>cv2.createTrackbar</code>. Løkker med <code>cv2.waitKey</code> henger, så skriv dem med en callback. Stopp starter Python på nytt, og da forsvinner filer skriptet har laget. Filer du har lagt til selv, blir lagt inn igjen.</p>
+    </div>
+  </section>
+</main>
+</div>
+
+
+<!-- three.js (r160) tegner 3D-kuben og 3D-sylinderen -->
+<script src="lib/three.min.js"></script>
+<script src="js/scene3d.js"></script>
+<script src="js/kube3d.js"></script>
+<script src="js/sylinder3d.js"></script>
+<!-- JavaScript-kopien av OpenCVs algoritme må lastes før app.js -->
+<script src="js/hsv-kopi.js"></script>
+<!-- Bildet med markøren -->
+<script src="js/bilde.js"></script>
+<!-- Kort som kan flyttes og endres -->
+<script src="js/oppsett.js"></script>
+<!-- Mappene skript/ og bilder/ (krever server.py), Python-fanen (Pyodide) og fanene øverst -->
+<script src="js/mapper.js"></script>
+<script src="js/utdata.js"></script>
+<script src="js/widgets.js"></script>
+<script src="js/widgets-py.js"></script>
+<script src="js/notatbok.js"></script>
+<script src="js/python.js"></script>
+<script src="js/faner.js"></script>
+<!-- app.js bygger siden og laster selv inn lib/opencv.js i bakgrunnen -->
+<script src="js/app.js"></script>
+</body>
+</html>
