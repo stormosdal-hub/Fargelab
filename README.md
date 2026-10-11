@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Fargelab for BGR og HSV
 
 En liten nettside for å eksperimentere med fargemodellene BGR og HSV slik OpenCV bruker dem. Endrer du en farge i den ene modellen, regnes verdiene i den andre ut med `cv.cvtColor` fra OpenCV.js.
@@ -384,3 +385,7 @@ Skriptet går gjennom alle 16,7 millioner BGR-farger og alle 11,8 millioner HSV-
 - Recursive: SIL Open Font License 1.1, se `fonts/OFL-recursive.txt`.
 - Pyodide: Mozilla Public License 2.0, se `lib/LICENSE-pyodide.txt`. Hver pakke i `lib/pyodide/` har lisensen sin inne i .whl-filen.
 - CodeMirror 5: MIT, se `lib/LICENSE-codemirror.txt`.
+=======
+# Fargelab
+Simulator for fargemodell og python notatbok
+>>>>>>> 388a58078b3c8532a43bc334a9c727c9aa2d76c1
