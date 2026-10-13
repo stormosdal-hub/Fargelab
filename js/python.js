@@ -100,7 +100,16 @@ plt.show = _show
 # cv2.imshow viser bildet under Utdata. Viser du et nytt bilde med samme
 # vindusnavn, byttes det gamle ut, som i et OpenCV-vindu. Som i vanlig OpenCV
 # ganges flyttall med 255, og 16-bits bilder deles på 256.
+import time as _time
+_imshow_tid = [0.0]   # sekunder brukt i cv2.imshow siden forrige cv2.waitKey
 def _imshow(winname, mat):
+    start = _time.perf_counter()
+    try:
+        _vis(winname, mat)
+    finally:
+        _imshow_tid[0] += _time.perf_counter() - start
+
+def _vis(winname, mat):
     img = np.asarray(mat)
     if img.dtype == np.bool_:
         img = img.astype(np.uint8) * 255
@@ -116,9 +125,158 @@ def _imshow(winname, mat):
     _send_png(png.tobytes(), winname, True, str(winname) in _mus)
 
 cv2.imshow = _imshow
-cv2.waitKey = lambda delay=0: -1
-cv2.waitKeyEx = lambda delay=0: -1
-cv2.pollKey = lambda: -1
+
+# cv2.waitKey(ms) venter ms millisekunder, så en løkke med cv2.imshow spiller av en
+# video i riktig fart. Den gir tasten du trykket mens koden kjørte (ellers -1), så
+# «if cv2.waitKey(1) == ord("q")» virker. Mens den venter, kommer også endringer i
+# glidebrytere (cv2.createTrackbar) og klikk i bilder fram, som i et OpenCV-vindu.
+# waitKey(0) (vent på en tast) venter ikke. Utskrift sendes før den venter.
+# Tiden cv2.imshow har brukt på å lage PNG siden forrige waitKey, trekkes fra, fordi
+# den ikke finnes på PC-en.
+# Å vente uten å låse Python krever run_sync (JSPI, i Chrome og Edge 137 eller nyere).
+# Ellers, og i widget-callbacks, ventes det med time.sleep, og tastene kommer ikke fram.
+from pyodide import ffi as _ffi
+
+def _kjor_hendelser():
+    # Endringer i widgets og klikk i bilder som kom mens koden ventet
+    for ev in json.loads(_fargelab_bro.hendelser()):
+        _fargelab_widget_event(ev["id"], ev["kind"], ev.get("value"))
+
+def _waitKey(delay=0):
+    used, _imshow_tid[0] = _imshow_tid[0], 0.0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    _fargelab_bro.flush()
+    ms = max(0.0, delay - used * 1000) if delay and delay > 0 else 0.0
+    if _ffi.can_run_sync():
+        _ffi.run_sync(_fargelab_bro.vent(ms))
+        _kjor_hendelser()
+        return int(_fargelab_bro.tast())
+    # time.sleep kan sove over 10 ms for lenge her, så det siste stykket ventes det aktivt
+    end = _time.perf_counter() + ms / 1000
+    while True:
+        rest = end - _time.perf_counter()
+        if rest <= 0:
+            break
+        if rest > 0.02:
+            _time.sleep(rest - 0.018)
+    return -1
+
+cv2.waitKey = _waitKey
+cv2.waitKeyEx = _waitKey
+cv2.pollKey = lambda: _waitKey(0)
+
+# Kamera og direktestrømmer. cv2.VideoCapture(0) er webkameraet, og en adresse til
+# MediaMTX (http://127.0.0.1:8889/cam/whep eller rtsp://127.0.0.1:8554/cam) er et
+# IP-kamera. Python har ikke tilgang til dem selv, så siden åpner strømmen
+# (kamera.js), og read() venter på neste bilde med run_sync. Filer går som før.
+_VideoCapture = cv2.VideoCapture
+_kameraer = [0]
+
+def _direkte(kilde):
+    if isinstance(kilde, bool):
+        return False
+    if isinstance(kilde, int):
+        return True
+    return isinstance(kilde, str) and kilde.split(":", 1)[0].lower() in ("http", "https", "rtsp", "rtsps", "whep")
+
+def _spor_siden(op, **args):
+    if not _ffi.can_run_sync():
+        raise RuntimeError("Kamera og direktestrømmer krever Chrome eller Edge 137 eller nyere (JSPI), og virker ikke inni en widget-callback.")
+    return _ffi.run_sync(_fargelab_bro.kamera(op, json.dumps(args)))
+
+class VideoCapture(_VideoCapture):
+    def __init__(self, *args, **kwargs):
+        self._live = None
+        kilde = args[0] if args else kwargs.get("filename", kwargs.get("index"))
+        if _direkte(kilde):
+            super().__init__()
+            self._apne(kilde)
+        else:
+            super().__init__(*args, **kwargs)
+
+    def _apne(self, kilde):
+        _kameraer[0] += 1
+        live = {"id": _kameraer[0], "open": False, "w": 0, "h": 0, "fps": 0.0, "n": 0, "bilde": None}
+        self._live = live
+        svar = _spor_siden("open", id=live["id"], kilde=kilde)
+        if svar.ok:
+            live.update(open=True, w=int(svar.width), h=int(svar.height), fps=float(svar.fps))
+        else:
+            print(f"cv2.VideoCapture({kilde!r}): {svar.feil}", file=sys.stderr)
+
+    def open(self, *args, **kwargs):
+        self.release()
+        kilde = args[0] if args else kwargs.get("filename", kwargs.get("index"))
+        if _direkte(kilde):
+            self._apne(kilde)
+            return self._live["open"]
+        return super().open(*args, **kwargs)
+
+    def isOpened(self):
+        return self._live["open"] if self._live else super().isOpened()
+
+    def grab(self):
+        if not self._live:
+            return super().grab()
+        live = self._live
+        if not live["open"]:
+            return False
+        svar = _spor_siden("frame", id=live["id"])
+        if not svar.ok:
+            live["open"] = False   # kameraet er stoppet eller borte
+            live["bilde"] = None
+            return False
+        w, h = int(svar.width), int(svar.height)
+        rgba = np.frombuffer(svar.data.to_py(), np.uint8).reshape(h, w, 4)
+        live.update(bilde=cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR), w=w, h=h, n=live["n"] + 1)
+        _kjor_hendelser()
+        return True
+
+    def retrieve(self, image=None, flag=0):
+        if not self._live:
+            return super().retrieve() if image is None else super().retrieve(image, flag)
+        b = self._live["bilde"]
+        return (b is not None, b)
+
+    def read(self, image=None):
+        if not self._live:
+            return super().read() if image is None else super().read(image)
+        return (True, self._live["bilde"]) if self.grab() else (False, None)
+
+    def get(self, prop):
+        if not self._live:
+            return super().get(prop)
+        live = self._live
+        return float({cv2.CAP_PROP_FRAME_WIDTH: live["w"], cv2.CAP_PROP_FRAME_HEIGHT: live["h"], cv2.CAP_PROP_FPS: live["fps"],
+                      cv2.CAP_PROP_POS_FRAMES: live["n"], cv2.CAP_PROP_FRAME_COUNT: -1}.get(prop, 0))
+
+    def set(self, prop, value):
+        if not self._live:
+            return super().set(prop, value)
+        navn = {cv2.CAP_PROP_FRAME_WIDTH: "width", cv2.CAP_PROP_FRAME_HEIGHT: "height", cv2.CAP_PROP_FPS: "fps"}.get(prop)
+        if not navn or not self._live["open"]:
+            return False
+        svar = _spor_siden("set", id=self._live["id"], **{navn: value})
+        if svar.ok:
+            self._live.update(w=int(svar.width), h=int(svar.height), fps=float(svar.fps))
+        return bool(svar.ok)
+
+    def release(self):
+        if self._live:
+            _fargelab_bro.lukk_kamera(self._live["id"])
+            self._live = None
+        else:
+            super().release()
+
+    def getBackendName(self):
+        return "Fargelab (nettleseren)" if self._live else super().getBackendName()
+
+    def __del__(self):
+        if getattr(self, "_live", None):
+            _fargelab_bro.lukk_kamera(self._live["id"])
+
+cv2.VideoCapture = VideoCapture
 cv2.destroyAllWindows = lambda: None
 cv2.destroyWindow = lambda winname: None
 cv2.namedWindow = lambda winname, flags=None: None
@@ -190,7 +348,8 @@ def _fargelab_widget_event(widget_id, kind, value=None):
     if kind == "mouse":
         if widget_id in _mus:
             onMouse, param = _mus[widget_id]
-            event, x, y, flags = (int(v) for v in value.to_py())
+            vals = value.to_py() if hasattr(value, "to_py") else value   # JS-liste, eller liste fra JSON
+            event, x, y, flags = (int(v) for v in vals)
             onMouse(event, x, y, flags, param)
         return
     ipywidgets._event(widget_id, kind, value)
@@ -546,6 +705,10 @@ display(widgets.HBox([effekt, speil, knapp]), ut)
     // Navnerommet til notatboken: variablene lever fra celle til celle til du starter på nytt.
     // scriptNs er navnerommet fra siste skript, som Variabler-panelet viser til neste kjøring.
     let nbGlobals = null, scriptNs = null, runCell = null, widgetEvent = null, listVars = null;
+    // Mens koden venter i cv2.waitKey eller cap.read(): svar fra siden (kamera), siste tast
+    // og widget-hendelser som kom underveis. pumping er sann fra første waitKey i en kjøring.
+    const asks = new Map();
+    let askSeq = 0, lastKey = -1, liveEvents = [], pumping = false, busy = false;
 
     // Utskrift samles og sendes i små porsjoner, så siden ikke drukner i meldinger
     const flush = () => {
@@ -616,6 +779,35 @@ display(widgets.HBox([effekt, speil, knapp]), ut)
       await py.loadPackage(['numpy', 'opencv-python', 'matplotlib'], { messageCallback: () => {} });
       py.registerJsModule('_fargelab_bro', {
         bilde(b64, title, window, mouse) { flush(); postMessage({ type: 'image', b64, title, window: !!window, mouse: !!mouse }); },
+        flush() { flush(); },   // cv2.waitKey sender utskriften før den venter
+        // Kamera (cv2.VideoCapture): siden åpner strømmen og sender bildene. Python venter
+        // på svaret med run_sync, og imens kan workeren ta imot meldinger.
+        kamera(op, args) {
+          return new Promise(resolve => {
+            const req = ++askSeq;
+            asks.set(req, resolve);
+            postMessage({ type: 'kamera', op, req, args: JSON.parse(args) });
+          });
+        },
+        lukk_kamera(id) { postMessage({ type: 'kamera', op: 'close', req: 0, args: { id } }); },
+        // cv2.waitKey: vent ms millisekunder. Første gang sier vi fra til siden, som da sender
+        // tastetrykk og endringer i widgets rett hit i stedet for å vente til koden er ferdig.
+        vent(ms) {
+          if (!pumping) { pumping = true; postMessage({ type: 'pump' }); }
+          return new Promise(resolve => setTimeout(resolve, ms));
+        },
+        tast() { const k = lastKey; lastKey = -1; return k; },
+        // Hendelsene som har kommet, som JSON. Flere endringer i samme widget blir den siste.
+        hendelser() {
+          const list = [], last = new Map();
+          for (const ev of liveEvents) {
+            if (ev.kind === 'value' && last.has(ev.id)) { list[last.get(ev.id)] = ev; continue; }
+            if (ev.kind === 'value') last.set(ev.id, list.length);
+            list.push(ev);
+          }
+          liveEvents = [];
+          return JSON.stringify(list);
+        },
         widget(json) { flush(); postMessage({ type: 'widget', op: JSON.parse(json) }); }
       });
       // ipywidgets.py og IPython/ legges i /fargelab, som oppstartskoden setter først i sys.path
@@ -641,6 +833,25 @@ display(widgets.HBox([effekt, speil, knapp]), ut)
         await ready;
       } catch (_) {
         if (m.type === 'run') postMessage({ type: 'done', ok: false, error: 'Python er ikke startet. Se meldingen øverst.', ms: 0 });
+        return;
+      }
+      // Svar fra siden og hendelser som kommer mens koden venter i cap.read() eller cv2.waitKey
+      if (m.type === 'kamera-svar') {
+        const resolve = asks.get(m.req);
+        asks.delete(m.req);
+        if (resolve) resolve(m);
+        return;
+      }
+      if (m.type === 'tast') { lastKey = m.code; return; }
+      if (m.type === 'hendelse') {
+        if (busy) { liveEvents.push(m.event); return; }
+        // Kom like etter at koden ble ferdig: kjøres med en gang
+        try {
+          widgetEvent(m.event.id, m.event.kind, m.event.value === undefined ? null : m.event.value);
+        } catch (err) {
+          out('stderr', cleanTraceback(err && err.message || err));
+        }
+        flush();
         return;
       }
       if (m.type === 'file') {
@@ -671,6 +882,7 @@ display(widgets.HBox([effekt, speil, knapp]), ut)
       } else if (m.type === 'run') {
         lines = 0;
         cut = false;
+        busy = true;
         const t0 = performance.now();
         let ns = null, error = null;
         try {
@@ -702,6 +914,12 @@ display(widgets.HBox([effekt, speil, knapp]), ut)
         } catch (err) {
           error = cleanTraceback(err && err.message || err, m.filename);
         } finally {
+          // Widget-hendelser som kom etter siste cv2.waitKey, kjøres før koden regnes som ferdig
+          if (liveEvents.length) {
+            try { py.globals.get('_kjor_hendelser')(); } catch (err) { if (!error) error = cleanTraceback(err && err.message || err); }
+          }
+          busy = pumping = false;
+          lastKey = -1;
           try { await py.runPythonAsync('_fargelab_vis_figurer()'); } catch (_) { /* ingen figurer */ }
           // Variablene fra skriptet tas vare på til neste kjøring, så Variabler-panelet kan vise dem
           if (ns) {
@@ -725,7 +943,9 @@ cv2.imshow("eksempel.png", img)
 `;
   const LAST_FILE_KEY = 'fargelab.python.sistefil';
   const MIGRATED_KEY = 'fargelab.python.flyttet-til-skript';
-  const MAX_SYNC_BYTES = 100 * 1024 * 1024;   // større filer i bilder/ legges ikke i Python-mappen
+  // Større filer i bilder/ legges ikke i Python-mappen. Python-mappen ligger i minnet,
+  // og en video på 300 MB tar like mye plass der.
+  const MAX_SYNC_BYTES = 300 * 1024 * 1024;
 
   function create(cfg) {
     const $ = id => document.getElementById(id);
@@ -744,6 +964,10 @@ cv2.imshow("eksempel.png", img)
     const fileBar = $('pyFileBar'), fileSel = $('pyFileSel'), fileState = $('pyFileState');
     const newBtn = $('pyNew'), saveFileBtn = $('pySaveFile'), renameBtn = $('pyRename'), deleteBtn = $('pyDelete');
     const folderNote = $('pyFolderNote'), filesCaption = $('pyFilesCaption'), filesFolderCaption = $('pyFilesFolderCaption');
+    // Kameraene Python har åpnet (kamera.js), som knapper i verktøylinjen
+    const kamera = root.Kamera ? root.Kamera.create({ host: $('pyCams') }) : null;
+    // Sann mens koden venter i cv2.waitKey: da går taster og widget-endringer rett til den
+    let pumping = false;
     // Variabler-panelet til høyre, og knappen som åpner det
     const varsPanel = $('pyVars'), varsBtn = $('pyVarsBtn'), varsClose = $('pyVarsClose');
     const varsAll = $('pyVarsAll'), varsList = $('pyVarsList'), varsScope = $('pyVarsScope'), varsCount = $('pyVarsCount');
@@ -1289,6 +1513,8 @@ cv2.imshow("eksempel.png", img)
     const waitingEvents = new Map();   // widget og type → siste hendelse i køen som ikke har startet
     let outputSeq = 0;                 // øker for hver melding med utdata fra Python
     function sendEvent(ev, owner) {
+      // Venter koden i cv2.waitKey (for eksempel i en kameraløkke), får den endringen med en gang
+      if (pumping && worker) { worker.postMessage({ type: 'hendelse', event: ev }); return; }
       const key = ev.id + ':' + ev.kind;
       const merge = ev.kind === 'value' || (ev.kind === 'mouse' && ev.value[0] === 0);
       const waiting = waitingEvents.get(key);
@@ -1443,6 +1669,7 @@ cv2.imshow("eksempel.png", img)
     // Legger filene i bilder/ i Python-mappen, så cv2.imread('navn.png') virker uten sti.
     // Bare nye og endrede filer sendes, og filer som er fjernet fra bilder/, fjernes også.
     let syncing = Promise.resolve();
+    const tooBig = new Set();   // filer det er sagt fra om at er for store (navn og endringstid)
     function syncBilder() {
       syncing = syncing.then(doSync, doSync);
       return syncing;
@@ -1453,7 +1680,15 @@ cv2.imshow("eksempel.png", img)
       try { list = await Mapper.list('bilder'); } catch (_) { return; }
       bilderNames = list.map(f => f.navn);
       for (const f of list) {
-        if (bilderSent.get(f.navn) === f.mtime || f.storrelse > MAX_SYNC_BYTES) continue;
+        if (bilderSent.get(f.navn) === f.mtime) continue;
+        if (f.storrelse > MAX_SYNC_BYTES) {
+          const key = f.navn + '|' + f.mtime;
+          if (!tooBig.has(key)) {
+            tooBig.add(key);
+            appendInfo(`bilder/${f.navn} er ${fmtSize(f.storrelse)} og for stor til å legges i Python-mappen (grensen er ${fmtSize(MAX_SYNC_BYTES)}). Gjør den mindre eller kortere først.`);
+          }
+          continue;
+        }
         try {
           const { data, mtime } = await Mapper.read('bilder', f.navn);
           if (!worker) return;
@@ -1514,6 +1749,8 @@ cv2.imshow("eksempel.png", img)
       else if (m.type === 'fileData') {
         if (m.purpose === 'bilder') { if (m.data) saveToBilder(m.name, m.data); } else download(m.name, m.data);
       } else if (m.type === 'done') finishRun(m);
+      else if (m.type === 'pump') pumping = true;
+      else if (m.type === 'kamera') answerCamera(m, e.target);
       else if (m.type === 'vars') {
         const r = pendingVars;
         pendingVars = null;
@@ -1595,7 +1832,36 @@ cv2.imshow("eksempel.png", img)
         worker.postMessage({ type: 'run', mode, code, filename, event, module: mode === 'event' ? null : moduleSource() });
       });
     }
+    // Python ber om noe fra et kamera (cv2.VideoCapture): åpne, neste bilde, endre eller lukke.
+    // Svaret går til workeren som spurte, hvis den fortsatt finnes.
+    async function answerCamera(m, from) {
+      let svar;
+      try {
+        if (!kamera) svar = { ok: false, feil: 'Kamera virker ikke i denne nettleseren.' };
+        else if (m.op === 'open') svar = await kamera.open(m.args.id, m.args.kilde);
+        else if (m.op === 'frame') svar = await kamera.frame(m.args.id);
+        else if (m.op === 'set') svar = await kamera.set(m.args.id, m.args);
+        else if (m.op === 'close') { kamera.close(m.args.id); svar = { ok: true }; }
+      } catch (err) {
+        svar = { ok: false, feil: err && err.message || String(err) };
+      }
+      if (!m.req || from !== worker) return;
+      worker.postMessage({ type: 'kamera-svar', req: m.req, ...svar }, svar && svar.data ? [svar.data] : []);
+    }
+
+    // Tastetrykk mens koden venter i cv2.waitKey, som tallet OpenCV gir (ord('q') = 113, Esc = 27).
+    // Ikke når du skriver i en editor eller et felt.
+    const KEYS = { Escape: 27, Enter: 13, Backspace: 8, Tab: 9, Delete: 127 };
+    document.addEventListener('keydown', e => {
+      if (!pumping || !worker || e.ctrlKey || e.metaKey || e.altKey || panel.hidden) return;
+      if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], .CodeMirror')) return;
+      const code = e.key.length === 1 ? e.key.codePointAt(0) : KEYS[e.key];
+      if (code === undefined) return;
+      worker.postMessage({ type: 'tast', code });
+    });
+
     function finishRun(m) {
+      pumping = false;
       setRunning(false);
       const done = pendingDone;
       pendingDone = null;
@@ -1625,7 +1891,9 @@ cv2.imshow("eksempel.png", img)
       if (!worker) return;
       worker.terminate();
       worker = null;
+      pumping = false;
       dropVars();
+      if (kamera) kamera.closeAll();   // kameraene hører til Python som er borte
       if (running) {
         const ms = performance.now() - runStart;
         sink.add({ type: 'info', text: `Stoppet etter ${fmtSec(ms)}. Python startes på nytt${isNotebook() ? ', og variablene i notatboken er borte' : ''}.` });
@@ -1643,6 +1911,7 @@ cv2.imshow("eksempel.png", img)
       if (worker) worker.postMessage({ type: 'reset' });
       if (notebook) notebook.kernelRestarted();
       if (root.Widgets) root.Widgets.detachAll();
+      if (kamera) kamera.closeAll();
       refreshVars();
     }
 

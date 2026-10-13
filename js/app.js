@@ -431,14 +431,17 @@
   // Markøren i bildet setter fargen som BGR, akkurat som om du dro i glidebryterne.
   // I gråtonemodus er fargen [Y, Y, Y], der Y er gråtonen OpenCV gir pikselen.
   // I binær modus er den [v, v, v], der v er 0 eller maxval fra cv2.threshold.
+  // I Kernel-modus er den verdien etter cv2.filter2D (BGR, eller grå som [v, v, v]).
   const bilde = window.Bilde ? window.Bilde.create({
     bgr2hsv,
     bgr2gray,
+    cv: () => engine.cv,   // Kernel-modus bruker cv.filter2D på store områder når OpenCV.js er klar
     onPick: p => {
-      const v = p.binary !== null ? p.binary : p.gray;
-      setFromBGR(v === null ? p.bgr : [v, v, v], {
+      const v = p.binary !== null ? p.binary : p.kernel !== null ? p.kernel : p.gray;
+      setFromBGR(v === null ? p.bgr : Array.isArray(v) ? v : [v, v, v], {
         x: p.x, y: p.y, name: p.name, orig: p.bgr,
-        gray: p.gray, binary: p.binary, thresh: p.thresh, maxval: p.maxval
+        gray: p.gray, binary: p.binary, thresh: p.thresh, maxval: p.maxval,
+        kernel: p.kernel, kernelInfo: p.kernelInfo
       });
     },
     // Bildet legges også i Python-mappen, så cv2.imread(navn) virker i Python-fanen.
@@ -494,8 +497,19 @@
 
   // Når fargen er hentet fra bildet, vises koden for å lese samme piksel i OpenCV
   function renderPixelCode() {
-    const { x, y, name, gray, orig, binary, thresh, maxval } = st.from;
+    const { x, y, name, gray, orig, binary, thresh, maxval, kernel, kernelInfo } = st.from;
     let html;
+    if (kernelInfo && window.Kernel) {
+      // Kernel-modus: cv2.filter2D med kernelen (og gråtone og terskel hvis de er på)
+      const opts = { name, gray: kernelInfo.gray, abs: kernelInfo.abs, thresh, maxval, x, y, value: binary !== null ? binary : kernel };
+      const code = lang === 'py' ? Kernel.python(kernelInfo.kern, opts) : Kernel.javascript(kernelInfo.kern, opts);
+      // Kommentarer (# … og // …) får samme farge som i de andre eksemplene
+      $('code').innerHTML = code.split('\n').map(line => {
+        const i = line.search(lang === 'py' ? /#/ : /\/\//);
+        return i < 0 ? esc(line) : esc(line.slice(0, i)) + cm(line.slice(i));
+      }).join('\n');
+      return;
+    }
     if (binary !== null) {
       // Binær modus: gråtone, så cv2.threshold med THRESH_BINARY
       if (lang === 'py') {
@@ -654,7 +668,7 @@
     $('roHex').textContent = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
     $('roPixBox').hidden = !st.from;
     if (st.from) {
-      const kind = st.from.binary !== null ? ', binær' : st.from.gray !== null ? ', gråtone' : '';
+      const kind = (st.from.kernelInfo ? ', kernel' : '') + (st.from.binary !== null ? ', binær' : st.from.gray !== null ? ', gråtone' : '');
       $('roPix').textContent = `x ${st.from.x}, y ${st.from.y}${kind}`;
     }
     if (bilde) bilde.sync(!!st.from);

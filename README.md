@@ -34,22 +34,27 @@ fargelab/
 ├── index.html            Oppsettet av siden
 ├── server.py             Lokal webserver: serverer siden og lar appen lese og skrive i skript/ og bilder/
 ├── skript/               Python-skriptene og notatbøkene dine (lages og lagres i Python-fanen)
-│   ├── kom_i_gang.py
 │   ├── bgr_kanaler.ipynb
-│   ├── notatbok_eksempel.ipynb
+│   ├── kamera_eksempel.ipynb Webkamera og IP-kamera (MediaMTX) med cv2.VideoCapture
+│   ├── sobel_kanter.ipynb   Kanter med cv2.Sobel, med stjerne.png
+│   ├── video_eksempel.ipynb Video med cv2.VideoCapture og cv2.VideoWriter, med baller.mp4
 │   └── widgets_eksempel.ipynb
 ├── bilder/               Bildene dine. Python-skriptene finner dem uten sti.
-│   └── eksempel.png
+│   ├── baller.mp4        6 sekunder med tre baller som spretter (H.264), til video_eksempel.ipynb
+│   ├── eksempel.png
+│   └── stjerne.png       8 streker med 22,5° mellom, til sobel_kanter.ipynb
 ├── css/
 │   └── style.css         Farger, skrift, oppsett, lyst og mørkt tema
 ├── js/
 │   ├── hsv-kopi.js       JavaScript-kopi av OpenCVs BGR <-> HSV, BGR -> grå og terskel (reserve)
+│   ├── kernel.js         Kernels (box, Gauss, Sobel …) og en JavaScript-kopi av cv2.filter2D
 │   ├── scene3d.js        Felles 3D-oppsett: kamera, snurring med musen, etiketter
 │   ├── kube3d.js         RGB-kuben i 3D
 │   ├── sylinder3d.js     HSV-sylinderen i 3D
 │   ├── bilde.js          Bilde med markør og lupp: henter fargen fra én piksel
 │   ├── oppsett.js        Kortene: flytte, endre størrelse og lagre oppsettet
 │   ├── python.js         Python-fanen: editor, Pyodide i en Web Worker, utdata og filer
+│   ├── kamera.js         Webkamera og IP-kamera (WebRTC fra MediaMTX) til cv2.VideoCapture i Python
 │   ├── mapper.js         Leser og skriver i skript/ og bilder/ gjennom server.py
 │   ├── notatbok.js       Notatbøker: celler med kode og tekst, lagres som .ipynb
 │   ├── utdata.js         Viser utdata (tekst, bilder, verdier og feil) for skript og celler
@@ -70,7 +75,8 @@ fargelab/
 │   ├── recursive.woff2   Skrifttypen Recursive
 │   └── OFL-recursive.txt
 └── test/
-    └── sammenlign.js     Sjekker at hsv-kopi.js gir samme tall som OpenCV.js
+    ├── sammenlign.js     Sjekker at hsv-kopi.js gir samme tall som OpenCV.js
+    └── kernel.js         Sjekker at kernel.js gir samme tall som cv.filter2D i OpenCV.js
 ```
 
 ## Hvordan det henger sammen
@@ -132,7 +138,7 @@ for navn in fargelab.bilder:            # alle filene i bilder/
 
 ### Notatbøker (som i Google Colab)
 
-En notatbok er en `.ipynb`-fil i `skript/` med celler under hverandre. Velg **Ny → Notatbok**, eller åpne `notatbok_eksempel.ipynb`.
+En notatbok er en `.ipynb`-fil i `skript/` med celler under hverandre. Velg **Ny → Notatbok**, eller åpne en som ligger der, for eksempel `sobel_kanter.ipynb`.
 
 - **Kodeceller** kjøres én og én med ▶-knappen. Alle cellene deler de samme variablene, så `img` fra én celle kan brukes i den neste. Tallet ved knappen, for eksempel `[3]`, viser rekkefølgen cellene ble kjørt i.
 - **Utdata** havner rett under cellen: `print()`, bilder fra `cv2.imshow` og `plt.show()`, og feilmeldinger. Verdien av siste linje vises av seg selv, slik at `img.shape` gir `(320, 480, 3)`. Avslutt linjen med `;` for å skjule den.
@@ -167,7 +173,56 @@ Knappen **Variabler** øverst til høyre åpner et panel med variablene Python h
 
 ### Bilder og figurer
 
-`cv2.imshow(navn, bilde)` og `plt.show()` viser bildene under *Utdata*. `cv2.waitKey` og `cv2.destroyAllWindows` gjør ingenting, så vanlig OpenCV-kode virker som den er. Figurer du ikke har vist, kommer når skriptet er ferdig. Som i vanlig OpenCV ganges bilder med flyttall med 255, så verdier fra 0 til 1 blir fra svart til hvitt.
+`cv2.imshow(navn, bilde)` og `plt.show()` viser bildene under *Utdata*. Viser du et nytt bilde med samme navn, byttes det gamle ut, som i et OpenCV-vindu. `cv2.waitKey(ms)` venter så mange millisekunder, så en løkke med `cv2.imshow` spiller av en video i riktig fart. Den gir tasten du trykket mens koden kjørte, ellers -1, så `if cv2.waitKey(1) & 0xFF == ord("q"): break` virker (klikk på bildet først, så havner ikke tasten i en celle). Mens `cv2.waitKey` venter, virker også glidebryterne fra `cv2.createTrackbar` og klikk i bildene, som i et OpenCV-vindu. `cv2.waitKey(0)` venter ikke på en tast, og `cv2.destroyAllWindows` gjør ingenting. Vanlig OpenCV-kode virker altså som den er. Tastene og glidebryterne i løkker krever Chrome eller Edge 137 eller nyere (JSPI). Figurer du ikke har vist, kommer når skriptet er ferdig. Som i vanlig OpenCV ganges bilder med flyttall med 255, så verdier fra 0 til 1 blir fra svart til hvitt.
+
+### Video
+
+Legg videofilene i mappen `bilder/`, så ligger de i Python-mappen som bildene, og `cv2.VideoCapture("film.mp4")` virker uten sti. OpenCV i Pyodide har FFmpeg innebygd. Åpne `skript/video_eksempel.ipynb` for å prøve med `bilder/baller.mp4`, en video med tre baller som spretter.
+
+```python
+cap = cv2.VideoCapture("baller.mp4")
+fps = cap.get(cv2.CAP_PROP_FPS)                      # 30
+antall = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))      # 180
+while True:
+    ok, bilde = cap.read()                           # ett bilde om gangen, som BGR
+    if not ok:
+        break
+    cv2.imshow("video", cv2.Canny(bilde, 50, 150))   # byttes ut for hvert bilde
+    cv2.waitKey(round(1000 / fps))                   # riktig fart
+```
+
+| | Virker | Virker ikke |
+|---|---|---|
+| Lese (`VideoCapture`) | MP4, MOV, M4V, MKV og WebM med H.264, H.265, VP8 eller VP9. AVI med MJPEG eller MPEG-4 (Xvid). | AV1 |
+| Skrive (`VideoWriter`) | `mp4v` til `.mp4`, `MJPG` eller `XVID` til `.avi` | H.264 (`avc1`) og WebM |
+
+- **Bla i videoen:** `cap.set(cv2.CAP_PROP_POS_FRAMES, n)` hopper til bilde `n`. Sammen med `@interact` gir det en glidebryter for hele videoen.
+- **Avspilling:** løkken over viser hvert bilde under cellen, og `cv2.waitKey` gir riktig fart. Tiden `cv2.imshow` bruker på å lage bildet i nettleseren, trekkes fra pausen, så avspillingen går omtrent like fort som på PC-en. Trykk **Stopp** for å avbryte.
+- **Videoer du lager** med `cv2.VideoWriter`, kommer i Filer-vinduet. Der kan du laste dem ned eller legge dem i `bilder/`. Nettleseren kan ikke spille av `mp4v` eller MJPEG selv, så bruk et videoprogram (for eksempel VLC), eller les dem inn igjen med `cv2.VideoCapture`.
+- **Størrelse:** Python-mappen ligger i minnet, så filer over 300 MB i `bilder/` legges ikke dit. Da står det en melding.
+- **Kamera og IP-kamera:** se neste avsnitt.
+
+### Kamera og IP-kamera
+
+`cv2.VideoCapture` virker også med webkamera og IP-kamera, med vanlig OpenCV-kode. Åpne `skript/kamera_eksempel.ipynb` for å prøve.
+
+```python
+cap = cv2.VideoCapture(0)                                  # webkamera (UVC)
+cap = cv2.VideoCapture("http://127.0.0.1:8889/cam/whep")   # IP-kamera gjennom MediaMTX
+while True:
+    ok, bilde = cap.read()                                 # venter på neste bilde fra kameraet
+    if not ok:
+        break
+    cv2.imshow("live", bilde)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+```
+
+- **Webkamera:** `cv2.VideoCapture(0)` er standardkameraet, `1` det neste og så videre. Nettleseren spør om lov første gang. Som i OpenCV starter det på 640 × 480, og `cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)` ber om noe annet.
+- **IP-kamera:** nettleseren kan ikke lese RTSP selv. MediaMTX henter strømmen fra kameraet og sender den videre over WebRTC (WHEP), som i prosjektet *openCV_webStream* (start den med `start.bat` der). Bruk adressen til MediaMTX: `http://127.0.0.1:8889/cam/whep`, eller `rtsp://127.0.0.1:8554/cam`, som gjøres om til den samme. En RTSP-adresse rett til kameraet gir en melding om dette.
+- **Knappene i verktøylinjen** viser kameraene som er på. Et trykk stopper kameraet, og da gir `cap.read()` `False`, så løkken slutter uten at variablene forsvinner. `cap.release()`, **Start på nytt** og **Stopp** stopper også kameraene.
+- **Glidebrytere og taster i løkken:** mens `cv2.waitKey` venter, virker glidebryterne fra `cv2.createTrackbar` og andre widgets, og tasten du trykker, kommer tilbake fra `cv2.waitKey`.
+- **Slik virker det:** Python kjører i bakgrunnen (en Web Worker) og har ikke tilgang til kamera eller WebRTC. Siden åpner strømmen (`js/kamera.js`), og `cap.read()` setter Python på pause til siden har sendt neste bilde. Pausen bruker JSPI (`pyodide.ffi.run_sync`), som krever Chrome eller Edge 137 eller nyere. Bildene kommer gjennom nettleseren, så fargene og skarpheten kan være litt annerledes enn det OpenCV på PC-en gir fra det samme kameraet.
 
 ### Widgets: glidebrytere, knapper og lister
 
@@ -240,7 +295,7 @@ Du kan også lukke vinduet med ×, Esc eller et klikk utenfor. Da blir `vindu.op
 Verdt å vite:
 
 - **tkinter og wxPython virker ikke.** Pyodide kjører i nettleseren, og der finnes ikke vinduer fra operativsystemet. Bruk widgets i stedet.
-- **Løkker med `cv2.waitKey` virker ikke.** `while True: ... cv2.waitKey(1)` henger, fordi Python ikke får vite at du har endret noe før koden er ferdig. Skriv koden med en callback (`interact`, `on_click`, `observe` eller trackbar-callbacken) i stedet.
+- **Løkker:** i en løkke med `cv2.waitKey` virker glidebryterne og tastene mens `cv2.waitKey` venter, som på PC-en (krever Chrome eller Edge 137 eller nyere). Uten `cv2.waitKey` i løkken får Python ikke vite at du har endret noe før koden er ferdig. Skriv da koden med en callback (`interact`, `on_click`, `observe` eller trackbar-callbacken) i stedet.
 - Når du drar fort i en glidebryter, hopper Python over mellomverdiene den ikke rakk, og kjører med den siste.
 - Widgetene virker så lenge siden er åpen og Python ikke er startet på nytt. **Start på nytt** og **Stopp** slår dem av, og da blir de bleke. Kjør cellen igjen for å få dem tilbake.
 - En notatbok lagres med et bilde av widgetene slik de stod, og med utdataene de hadde laget.
@@ -313,6 +368,25 @@ Markøren starter midt i bildet. Fargen til pikselen under markøren settes som 
 
 - **Binær:** kryss av for *Binær*. Da dukker det opp to glidebrytere, *Terskel* (`thresh`, 0–255) og *Maksverdi* (`maxval`, 0–255). Bildet gjøres grått og deretter binært, slik `cv2.threshold(gray, thresh, maxval, cv2.THRESH_BINARY)` gjør det: piksler med gråtone over terskelen får maksverdien, resten blir 0. Fargekartene får binærverdien til pikselen under markøren som `[v, v, v]`, altså svart eller grått/hvitt. Ved luppen står binærverdien, gråtonen og sammenligningen med terskelen, for eksempel «Grå 151 > thresh 127, så pikselen får maxval = 255». Binær bruker alltid gråtone, så *Gråtone*-valget er slått av så lenge.
 
+### Kernel: filtre som box, Gauss og Sobel
+
+Kryss av for **Kernel** ved knappene i bildekortet. Da legges en kernel over bildet rundt markøren, og et panel med tallene kommer fram under bildet. Det er det samme som `cv2.filter2D(img, -1, kernel)` gjør.
+
+- **Linsen** er firkanten rundt markøren. Der ser du bildet etter kernelen, og den følger med når du drar. Under **Vis** kan du velge en liten eller stor linse, eller **hele bildet**.
+- **Kernel** velger en ferdig kernel:
+  - box-filter (gjennomsnitt), Gauss og bevegelsesuskarphet, som kan være 3 × 3, 5 × 5 eller 7 × 7
+  - skarphet, Sobel x og y, Laplace, kanter (8 naboer), preg og identitet
+  - Gauss har også **σ**, der 0 betyr at OpenCV velger σ ut fra størrelsen.
+- **Matrisen** i midten av panelet er kernelen. Tallene deles på tallet foran, for eksempel 1/16 for Gauss 3 × 3. Du kan skrive nye tall rett i rutene (2, -1, 0,5 eller 1/9). Da blir det din egen kernel, som du også kan gjøre større eller mindre. Under står det hva vektene summerer til. Er summen 1, beholder flater lysstyrken. Er den 0, blir flater svarte, og bare kanter gir utslag.
+- **Før** og **Etter** viser pikselverdiene rundt markøren før og etter kernelen. Den gule rammen i *Før* er pikslene kernelen dekker, og under står utregningen for pikselen, for eksempel «53·(−1) + 255 + 53·(−2) + … = 808 → 255». Pek på en rute i *Etter* for å se utregningen for den, og klikk på en rute for å flytte markøren dit.
+- **Kanal** velger om tallene viser B, G eller R. Kernelen virker på hver kanal for seg, som i OpenCV. I gråtone- og binær modus virker den på gråtonen, og binær modus bruker terskelen på resultatet.
+- **Negative tall:** med `ddepth=-1` klipper OpenCV til 0–255, så negative summer blir 0. For Sobel betyr det at kanter fra lyst til mørkt forsvinner. Velg *absoluttverdi* for å få `cv2.convertScaleAbs(cv2.filter2D(img, cv2.CV_32F, kernel))` i stedet.
+- **Utenfor bildet** speiler OpenCV pikslene uten å gjenta kantpikselen (`BORDER_REFLECT_101`). I *Før* vises speilede verdier i kursiv.
+- **Luppen** viser pikslene etter kernelen, med en gul stiplet ramme rundt pikslene kernelen dekker.
+- **Python-kode for dette** viser koden som gir de samme tallene, og fargekartene og kodeeksempelet lenger ned får verdien etter kernelen.
+
+Tallene regnes nøyaktig som i OpenCV: kernelen snus ikke (korrelasjon), summen regnes i 32-bits flyttall, og resultatet rundes til nærmeste heltall, med halve til partall. `node test/kernel.js` sjekker at `js/kernel.js` gir de samme tallene som `cv.filter2D` i OpenCV.js for alle de ferdige kernelene og for tilfeldige egne kernels. Store områder (stor linse og hele bildet) regnes med `cv.filter2D` når OpenCV.js er lastet, så det går raskere. `cv2.GaussianBlur` og `cv2.blur` regner med heltall internt, og kan derfor avvike med 1 fra `cv2.filter2D` med samme kernel.
+
 ### Slik regner OpenCV ut gråtonen
 
 Formelen er Y = 0,299 R + 0,587 G + 0,114 B, men OpenCV 4 regner med heltall: `(3735·B + 19235·G + 9798·R + 16384) >> 15`. Det gir ikke alltid samme svar som å runde av formelen med desimaltall. For rundt 21 000 av de 16,7 millioner fargene blir svaret 1 høyere eller lavere. Siden bruker heltallsversjonen, og `node test/sammenlign.js` kontrollerer at den stemmer med OpenCV.js for alle farger.
@@ -362,6 +436,8 @@ Har du [Node.js](https://nodejs.org) installert, kan du sammenligne `hsv-kopi.js
 cd fargelab
 node test/sammenlign.js
 ```
+
+Kernel-kopien (`kernel.js`) kontrolleres mot `cv.filter2D` med `node test/kernel.js`. Den tar et par sekunder.
 
 Skriptet går gjennom alle 16,7 millioner BGR-farger og alle 11,8 millioner HSV-kombinasjoner. Det kontrollerer også gråtonen for alle BGR-farger, og terskelen (`cv2.threshold` med `THRESH_BINARY`) for alle kombinasjoner av gråtone, `thresh` og `maxval`. Det skriver ut om noen tall er forskjellige.
 

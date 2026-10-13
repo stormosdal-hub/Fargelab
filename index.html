@@ -57,6 +57,7 @@
       <div class="img-actions">
         <label class="check" id="imgGrayBox" title="Vis bildet i gråtoner, og send gråtonen til fargekartene (cv2.COLOR_BGR2GRAY)" hidden><input type="checkbox" id="imgGray"> Gråtone</label>
         <label class="check" id="imgBinBox" title="Vis bildet binært: maxval der gråtonen er over terskelen, ellers 0 (cv2.threshold med THRESH_BINARY)" hidden><input type="checkbox" id="imgBin" aria-controls="imgThresh"> Binær</label>
+        <label class="check" id="imgKernBox" title="Legg en kernel over bildet rundt markøren (cv2.filter2D), og se tallene før og etter" hidden><input type="checkbox" id="imgKern" aria-controls="imgKernel"> Kernel</label>
         <select class="img-folder" id="imgFolderSel" aria-label="Åpne et bilde fra mappen bilder/" hidden>
           <option value="">Fra bilder/ …</option>
         </select>
@@ -84,6 +85,7 @@
       <div class="img-stage fit" id="imgStage">
         <div class="img-frame" id="imgFrame" tabindex="0" aria-label="Bilde. Klikk, dra eller bruk piltastene for å flytte markøren." aria-describedby="imgHint">
           <canvas id="imgView" width="0" height="0"></canvas>
+          <canvas class="img-lens" id="imgLens" width="0" height="0" aria-hidden="true" hidden></canvas>
           <div class="img-marker" id="imgMarker">
             <svg viewBox="0 0 40 40" aria-hidden="true">
               <g fill="none" stroke-linecap="round">
@@ -99,6 +101,7 @@
         <div class="img-info">
           <dl class="img-vals" aria-live="polite">
             <dt>Piksel</dt><dd class="num" id="imgXY"></dd>
+            <dt id="imgKernDt" hidden>Kernel</dt><dd class="num" id="imgKernDd" hidden><span class="swatch" id="imgKernSwatch"></span><span id="imgKernVal"></span></dd>
             <dt id="imgBinDt" hidden>Binær</dt><dd class="num" id="imgBinDd" hidden><span class="swatch" id="imgBinSwatch"></span><span id="imgBinVal"></span></dd>
             <dt id="imgGrayDt" hidden>Grå</dt><dd class="num" id="imgGrayDd" hidden><span class="swatch" id="imgGraySwatch"></span><span id="imgGrayVal"></span></dd>
             <dt>BGR</dt><dd class="num"><span class="swatch" id="imgSwatch"></span><span id="imgBGR"></span></dd>
@@ -111,6 +114,55 @@
           <button type="button" class="btn" id="imgApply" hidden>Bruk pikselen</button>
         </div>
       </div>
+    </div>
+    <!-- Kernel-modus (bilde.js og kernel.js): kernelen, og pikslene før og etter -->
+    <div class="img-kernel" id="imgKernel" hidden>
+      <div class="kern-controls">
+        <label class="kern-field">Kernel <select id="kernType"></select></label>
+        <label class="kern-field">Størrelse
+          <select id="kernSize"><option value="3">3 × 3</option><option value="5">5 × 5</option><option value="7">7 × 7</option></select>
+        </label>
+        <label class="kern-field kern-sigma" id="kernSigmaBox">σ
+          <input type="range" id="kernSigma" min="0" max="5" step="0.1" value="0">
+          <span class="num" id="kernSigmaVal">0 (auto)</span>
+        </label>
+        <label class="kern-field" title="cv2.filter2D med ddepth=-1 klipper til 0–255, så negative tall blir 0. cv2.convertScaleAbs gir absoluttverdien.">Negative tall
+          <select id="kernNeg"><option value="clip">blir 0</option><option value="abs">absoluttverdi</option></select>
+        </label>
+        <label class="kern-field">Vis
+          <select id="kernArea"><option value="72">liten linse</option><option value="160" selected>stor linse</option><option value="all">hele bildet</option></select>
+        </label>
+        <div class="kern-field" id="kernChBox">Kanal
+          <span class="kern-ch" role="group" aria-label="Kanalen tallene viser">
+            <button type="button" data-ch="B" aria-pressed="false">B</button><button type="button" data-ch="G" aria-pressed="false">G</button><button type="button" data-ch="R" aria-pressed="true">R</button>
+          </span>
+        </div>
+      </div>
+      <p class="kern-about" id="kernAbout"></p>
+      <div class="kern-grids">
+        <div class="kern-box">
+          <h3 class="kern-h">Før <span class="kern-h-sub" id="kernBeforeSub"></span></h3>
+          <div class="kern-grid" id="kernBefore"></div>
+        </div>
+        <span class="kern-op" title="Kernelen legges over pikslene, og produktene summeres (korrelasjon)">⋆</span>
+        <div class="kern-box">
+          <h3 class="kern-h">Kernel <span class="kern-h-sub" id="kernMatSub"></span></h3>
+          <div class="kern-matrix">
+            <label class="kern-den" title="Alle tallene i kernelen deles på dette tallet">1 /<input type="text" id="kernDen" class="num" inputmode="decimal" spellcheck="false" aria-label="Del alle tallene i kernelen på"> ×</label>
+            <div class="kern-grid kern-weights" id="kernMatrix"></div>
+          </div>
+        </div>
+        <span class="kern-op">=</span>
+        <div class="kern-box">
+          <h3 class="kern-h">Etter <span class="kern-h-sub" id="kernAfterSub"></span></h3>
+          <div class="kern-grid" id="kernAfter"></div>
+        </div>
+      </div>
+      <p class="kern-calc" id="kernCalc"></p>
+      <details class="kern-code-box">
+        <summary>Python-kode for dette</summary>
+        <pre class="kern-code"><code id="kernCode"></code></pre>
+      </details>
     </div>
     <p class="caption img-hint" id="imgHint" hidden>Klikk eller dra i bildet for å flytte markøren. Piltastene flytter én piksel om gangen, med Shift ti. Klikk i luppen for å velge en av nabopikslene.</p>
   </section>
@@ -252,6 +304,8 @@
     <label class="py-examples">Eksempel
       <select id="pyExamples"><option value="">Velg et eksempel …</option></select>
     </label>
+    <!-- Kameraer Python har åpnet med cv2.VideoCapture (kamera.js). Et trykk stopper kameraet. -->
+    <span class="py-cams" id="pyCams" aria-label="Kameraer som er på" hidden></span>
     <span class="py-spacer"></span>
     <button type="button" class="btn" id="pyOpen">Åpne .py</button>
     <button type="button" class="btn" id="pySave">Lagre .py</button>
@@ -348,7 +402,7 @@
   <section class="notes" aria-label="Verdt å vite om Python-fanen">
     <div>
       <h3>Bilder vises under Utdata</h3>
-      <p><code>cv2.imshow(navn, bilde)</code> og <code>plt.show()</code> viser bildene under Utdata. <code>cv2.waitKey</code> og <code>cv2.destroyAllWindows</code> gjør ingenting. Figurer du ikke har vist, kommer til slutt. Med <code>cv2.setMouseCallback</code> kan du klikke i bildene.</p>
+      <p><code>cv2.imshow(navn, bilde)</code> og <code>plt.show()</code> viser bildene under Utdata. <code>cv2.waitKey(ms)</code> venter, så en løkke med <code>cv2.imshow</code> spiller av en video i riktig fart, og gir tasten du trykket. <code>cv2.VideoCapture(0)</code> er webkameraet, og en adresse til MediaMTX er et IP-kamera. <code>cv2.waitKey(0)</code> og <code>cv2.destroyAllWindows</code> gjør ingenting. Figurer du ikke har vist, kommer til slutt. Med <code>cv2.setMouseCallback</code> kan du klikke i bildene.</p>
     </div>
     <div>
       <h3>Hent verdier fra Fargelab</h3>
@@ -360,7 +414,7 @@
     </div>
     <div>
       <h3>Det som ikke virker</h3>
-      <p><code>input()</code>, tkinter og wxPython virker ikke i nettleseren. Bruk widgets i stedet: <code>@interact</code>, <code>ipywidgets</code> eller <code>cv2.createTrackbar</code>. Løkker med <code>cv2.waitKey</code> henger, så skriv dem med en callback. Stopp starter Python på nytt, og da forsvinner filer skriptet har laget. Filer du har lagt til selv, blir lagt inn igjen.</p>
+      <p><code>input()</code>, tkinter og wxPython virker ikke i nettleseren. Bruk widgets i stedet: <code>@interact</code>, <code>ipywidgets</code> eller <code>cv2.createTrackbar</code>. I en løkke kommer tastetrykk og endringer i glidebrytere bare fram mens <code>cv2.waitKey</code> venter. Kamera og tastene i løkker krever Chrome eller Edge 137 eller nyere. Stopp starter Python på nytt, og da forsvinner filer skriptet har laget. Filer du har lagt til selv, blir lagt inn igjen.</p>
     </div>
   </section>
 </main>
@@ -374,6 +428,7 @@
 <script src="js/sylinder3d.js"></script>
 <!-- JavaScript-kopien av OpenCVs algoritme må lastes før app.js -->
 <script src="js/hsv-kopi.js"></script>
+<script src="js/kernel.js"></script>
 <!-- Bildet med markøren -->
 <script src="js/bilde.js"></script>
 <!-- Kort som kan flyttes og endres -->
@@ -384,6 +439,7 @@
 <script src="js/widgets.js"></script>
 <script src="js/widgets-py.js"></script>
 <script src="js/notatbok.js"></script>
+<script src="js/kamera.js"></script>
 <script src="js/python.js"></script>
 <script src="js/faner.js"></script>
 <!-- app.js bygger siden og laster selv inn lib/opencv.js i bakgrunnen -->
